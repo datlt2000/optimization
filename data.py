@@ -22,10 +22,10 @@ def convert_data(data):
     return dataset
 
 
-def read_dataset(filename="E/E-n13-k4.vrp"):
+def read_dataset(filename="A/A-n9-k2.vrp"):
     # read file and convert data to dict
     # return data as dict
-    path = f"./dataset/{filename}"
+    path = f"./data/{filename}"
     path = path.format(filename=filename)
     with open(path, 'r') as f:
         lines = f.readlines()
@@ -38,5 +38,5 @@ def read_dataset(filename="E/E-n13-k4.vrp"):
 
 
 if __name__ == "__main__":
-    data = read_dataset('P/P-n16-k8.vrp')
+    data = read_dataset('A/A-n9-k2.vrp')
     print(data)
