@@ -19,6 +19,9 @@ def convert_data(data):
                 a['x'] = int(ds[1])
                 a['y'] = int(ds[2])
                 dataset[int(ds[0])] = a
+        if len(ds) == 2:
+            if ds[0].isnumeric() and ds[1].isnumeric():
+                dataset[int(ds[0])]['d'] = int(ds[1])
     return dataset
 
 
@@ -38,5 +41,5 @@ def read_dataset(filename="A/A-n9-k2.vrp"):
 
 
 if __name__ == "__main__":
-    data = read_dataset('A/A-n9-k2.vrp')
+    data = read_dataset('A/A-n32-k5.vrp')
     print(data)
