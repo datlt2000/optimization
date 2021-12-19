@@ -1,97 +1,206 @@
+﻿import math
+import time
+
 from ortools.linear_solver import pywraplp
+import matplotlib.pyplot as plt
 
-N = 5
-K = 3
-d = [
-    [0, 25, 16, 7, 38, 29],
-    [17, 0, 26, 32, 11, 44],
-    [25, 55, 0, 12, 18, 9],
-    [10, 15, 26, 0, 38, 20],
-    [14, 24, 23, 47, 0, 21],
-    [21, 25, 35, 15, 6, 0]
-]
-# create model
-solver = pywraplp.Solver.CreateSolver('SCIP')
 
-# Variables.
-x = []
-for i in range(N + 1):
-    x.append([])
-    for j in range(N + 1):
-        x[i].append([])
-        for k in range(K):
-            x[i][j].append(solver.IntVar(0, 1, 'x[{}][{}][{}]'.format(i, j, k)))
+def trim(s):
+    # replace multi space, tab and new line by space
+    # return string
+    new_str = s.replace("\n", " ").replace("\r\n", " ")
+    new_str = ' '.join(new_str.split())
+    new_str = new_str.strip()
+    return new_str
 
-y = []
-for i in range(N):
-    y.append([])
-    for k in range(K):
-        y[i].append(solver.IntVar(0, 1, 'y[{}][{}]'.format(i, k)))
 
-u = []
-for i in range(N):
-    u.append([])
-    for k in range(K):
-        u[i].append(solver.IntVar(1, N, 'u[{}][{}]'.format(i, k)))
+def convert_data(data):
+    # convert list data string to dict of int
+    # return dict
+    dataset = dict()
+    for d in data:
+        ds = d.split()
+        if len(ds) == 3:
+            if ds[0].isnumeric() and ds[1].isnumeric() and ds[2].isnumeric():
+                a = dict()
+                a['x'] = int(ds[1])
+                a['y'] = int(ds[2])
+                dataset[int(ds[0])] = a
+        if len(ds) == 2:
+            if ds[0].isnumeric() and ds[1].isnumeric():
+                dataset[int(ds[0])]['d'] = int(ds[1])
+    return dataset
 
-# Constraints
-for k in range(K):
-    solver.Add(sum(x[0][i][k] for i in range(1, N + 1)) == 1)
-for k in range(K):
-    solver.Add(sum(x[i][0][k] for i in range(1, N + 1)) == 1)
 
-# 2: If point i is served by vehicle k, we have the followings:
-for i in range(1, N + 1):
-    for k in range(K):
-        solver.Add(sum(x[i][j][k] for j in range(N + 1)) == y[i - 1][k])
-for i in range(1, N + 1):
-    for k in range(K):
-        solver.Add(sum(x[j][i][k] for j in range(N + 1)) == y[i - 1][k])
+def read_dataset(filename="vrp/P-n20-k4.vrp"):
+    # read file and convert data to dict
+    # return data as dict
+    path = f"./data/{filename}"
+    path = path.format(filename=filename)
+    with open(path, 'r') as f:
+        lines = f.readlines()
+    data = []
+    for line in lines:
+        striped = trim(line)
+        data.append(striped)
+    dataset = convert_data(data)
+    return dataset
 
-# 3: Each point must be served by at least one vehicle
-for i in range(1, N + 1):
-    solver.Add(sum(x[j][i][k] for k in range(K)
-                   for j in range(N + 1)) == 1)
 
-# 4: MLZ
-for i in range(1, N + 1):
-    for j in range(1, N + 1):
-        if j != i:
-            for k in range(K):
-                solver.Add(u[i - 1][k] - u[j - 1][k] + N * x[i][j][k] <= N - 1)
+class JobScheduling:
+    def __init__(self, position=None, num_staff=None):
+        self.num_staff = num_staff
+        self.position = position
+        self.num_customer = len(position)
+        self.y = {}  # IntVar
+        self.x = {}  # IntVar
+        self.solver = None  # Ortool Solver
+        self.objective = None  # Ortool objective
+        self.obj = 0
 
-# 5: Ban loop
-for i in range(N + 1):
-    for k in range(K):
-        solver.Add(x[i][i][k] == 0)
+    def create_solver(self):
+        self.solver = pywraplp.Solver.CreateSolver('SCIP')
 
-# Objective
-for k in range(K):
-    solver.Minimize(sum(d[i][j] * x[i][j][k]
-                        for i in range(N + 1) for j in range(N + 1) for k in range(K)))
-# Solve
-status = solver.Solve()
+    def create_var(self):
+        # Creates variables.
 
-# Print solution
-if status == pywraplp.Solver.FEASIBLE or status == pywraplp.Solver.OPTIMAL:
-    print('Solution:')
-    print('Objective value =', solver.Objective().Value())
-    for k in range(K):
-        print("-- Vehicle {} --".format(k))
-        l = []
-        start = 0
-        while True:
-            l.append(start)
-            print("Point {}".format(start))
-            for i in range(N + 1):
-                if x[start][i][k].solution_value() == 1:
-                    start = i
-                    break
-            if i == 0:
-                break
-        print("Point 0")
-        print("++ Visiting order: {} ++".format(l + [0]))
-        s = d[l[-1]][0]
-        for i in range(1, len(l)):
-            s += d[l[i - 1]][l[i]]
-        print("++ Distance: {} ++\n".format(s))
+        # MTZ constrain
+        for i in range(self.num_customer):
+            self.y[i] = self.solver.IntVar(1, self.num_customer + 2, 'y[{}]'.format(i))
+
+        # x[k, i, j] = 1 if k move from customer i to j
+        for k in range(self.num_staff):
+            for i in range(self.num_customer):
+                for j in range(self.num_customer):
+                    self.x[k, i, j] = self.solver.IntVar(0, 1, 'z[{}][{}]'.format(k, i))
+
+        # objective
+        self.obj = self.solver.IntVar(0, self.solver.infinity(), "obj")
+
+    def add_constrain(self):
+        # every customer must be visited one time
+        for i in range(1, self.num_customer):
+            self.solver.Add(sum(self.x[k, i, j] for j in range(self.num_customer) for k in range(self.num_staff)) == 1)
+
+        # if staff k visit i, he must move from i
+        for i in range(1, self.num_customer):
+            # self.solver.Add(sum(self.x[j, i] for j in range(self.num_customer)) == 1)
+            for k in range(self.num_staff):
+                self.solver.Add(sum(self.x[k, j, i] for j in range(self.num_customer)) == sum(
+                    self.x[k, i, j] for j in range(self.num_customer)))
+
+        # after work every staff go back office
+        for k in range(self.num_staff):
+            self.solver.Add(sum(self.x[k, 0, i] for i in range(1, self.num_customer)) == sum(
+                self.x[k, i, 0] for i in range(1, self.num_customer)))
+
+        # MTZ sub tour constrain
+        for i in range(1, self.num_customer):
+            for j in range(1, self.num_customer):
+                if i != j:
+                    self.solver.Add(self.y[i] - self.y[j] + self.num_customer * sum(
+                        self.x[k, i, j] for k in range(self.num_staff)) <= self.num_customer - 1)
+
+        # 5: Ban loop
+        for i in range(self.num_customer):
+            for k in range(self.num_staff):
+                self.solver.Add(self.x[k, i, i] == 0)
+
+        # Objective
+        for k in range(self.num_staff):
+            self.solver.Add(
+                sum(self.x[k, i, j] * (
+                        self.distince(self.position[i + 1], self.position[j + 1]) + self.position[j + 1]['d'])
+                    for i in range(self.num_customer) for j in range(self.num_customer)) <= self.obj)
+
+    @staticmethod
+    def distince(f, t):
+        return math.sqrt(math.pow(f['x'] - t['x'], 2) + math.pow(f['y'] - t['y'], 2))
+
+    def set_objective(self):
+        self.solver.Minimize(self.obj)
+
+    def solve(self):
+        self.create_solver()
+        self.create_var()
+        self.add_constrain()
+        self.set_objective()
+        print("solving")
+        print("-------------------")
+        start_time = time.time()
+        status = self.solver.Solve()
+        if status == pywraplp.Solver.OPTIMAL or status == pywraplp.Solver.FEASIBLE:
+            s = self.print_result()
+        else:
+            s = "cannot solve"
+            print("cannot solve")
+        end_time = time.time() - start_time
+        s += "Solve time: {t} s\n".format(t=end_time)
+        print("Solve time: %s s" % end_time)
+        return s
+
+    @staticmethod
+    def visualize(data, position):
+        for i in data:
+            x = []
+            y = []
+            for j in i:
+                x.append(position[j + 1]['x'])
+                y.append(position[j + 1]['y'])
+            plt.plot(x, y)
+        plt.show()
+
+    def print_result(self):
+        # Statistics.
+        s = "IP solution: \n"
+        s += "Cost: {obj:.3f}\n".format(obj=self.solver.Objective().Value())
+        edges_list = [-1] * self.num_customer
+        for i in range(self.num_customer):
+            for j in range(1, self.num_customer):
+                for k in range(self.num_staff):
+                    if self.x[k, i, j].solution_value() == 1:
+                        edges_list[j] = i
+
+        routing = [[0]] * self.num_staff
+        for i in range(self.num_staff):
+            s += 'Path: ' + str(0)
+            n = 0
+            done = False
+            while not done:
+                done = True
+                for j in range(1, self.num_customer):
+                    if edges_list[j] == n:
+                        routing[i].append(j)
+                        s += ' --> ' + str(j)
+                        if n == 0:
+                            edges_list[j] = -1
+                        n = j
+                        done = False
+                        break
+            routing[i].append(0)
+            s += '-->' + str(0) + '\n'
+            print(s)
+        self.visualize(routing, self.position)
+        return s
+
+
+def main():
+    file_name = "vrp/a.vrp"
+    # path = input("path to file: ")
+    print("reading data ...")
+    print("-----------------")
+    data = read_dataset(file_name)
+    print(data)
+    # Creates the solver.
+    shortest_path = JobScheduling(position=data, num_staff=4)
+    s = shortest_path.solve()
+    s += 'end \n -----------------\n'
+    with open("../result/vrp.txt", 'a') as f:
+        f.write(file_name + '\n')
+        f.write(s)
+    print("end")
+    print("------------------")
+
+
+if __name__ == '__main__':
+    main()
